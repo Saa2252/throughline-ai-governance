@@ -74,7 +74,14 @@
     const toolDef = id => P.triage.tools.find(x => x.id === id) || {};
     const hot = tools.filter(id => toolDef(id).high);
     const declared = !!intake && /agent/i.test(intake.kind || '') && !/^AI system/i.test(intake.kind || '');
-    const agent = declared || autonomy >= 2 || hot.length > 0;
+    const combo = P.scoring.combination;
+    const trifecta = (+imp.data || 0) >= combo.dataFrom && tools.some(id => toolDef(id).untrusted) && tools.some(id => toolDef(id).out);
+    const agent = declared || autonomy >= 2 || hot.length > 0 || trifecta;
+    // EU AI Act role. Art. 25: modify, repurpose or rebrand someone else's system and you become its provider.
+    const euRole = (intake && intake.euRole) || '';
+    const statedProvider = /^(Provider|Both)/.test(euRole);
+    const art25 = !!a.modified && !statedProvider;
+    const provider = statedProvider || art25;
     const flags = {
       thirdParty: !!intake && !!intake.source && intake.source !== 'Built in-house',
       personalData: (+imp.data || 0) >= 2,
@@ -82,6 +89,7 @@
       agentState: agent && tools.some(id => toolDef(id).state),
       art50: transparency.length > 0,
       exemption,
+      provider, deployer: !/^Provider/.test(euRole), providerHigh: provider && high, art25,
     };
     const profile = agent ? { tools, autonomy } : null;
 
@@ -99,7 +107,7 @@
     }
 
     if (agent) {
-      if (!declared) reasons.push('Treated as an agent, although not declared as one: it ' + (autonomy >= 2 ? 'acts without per-step human approval.' : 'holds a consequential tool.'));
+      if (!declared) reasons.push('Treated as an agent, although not declared as one: it ' + (autonomy >= 2 ? 'acts without per-step human approval.' : hot.length ? 'holds a consequential tool.' : 'combines sensitive data, untrusted input and a way out.'));
       const names = hot.map(id => toolDef(id).text.toLowerCase()).join('; ');
       if (hot.length && autonomy >= 2 && impactTier > 1) {
         impactTier = 1;
@@ -107,6 +115,10 @@
       } else if (hot.length && impactTier > 2) {
         impactTier = 2;
         reasons.push('Agent rule → Elevated: holds consequential tools (' + names + ').');
+      }
+      if (trifecta && impactTier > combo.tier) {
+        impactTier = combo.tier;
+        reasons.push('Combination rule → ' + P.tiers[combo.tier].name + ': it handles sensitive data, takes in content it does not control, and has a way to send data out. No single tool is consequential, but together an injected instruction can exfiltrate data.');
       }
       reasons.push('Agent track applies. Approval covers this tool set at ' + P.agentTrack.levels[autonomy] + ' and nothing wider.');
     }
@@ -122,6 +134,9 @@
     } else if (transparency.length) regClass = 'limited';
     if (transparency.length) reasons.push('Transparency duties apply (' + transparency.map(id => text(P.triage.transparency, id)).join(', ') + ').');
 
+    if (art25) reasons.push('Art. 25: we modified, repurposed or rebranded a third-party system, so we are treated as its provider.');
+    if (high || provider) reasons.push('EU AI Act role: ' + (provider && flags.deployer ? 'provider and deployer' : provider ? 'provider' : 'deployer') + '. ' +
+      (provider ? 'Provider duties are in scope (data governance, technical documentation' + (high ? ', conformity assessment' : '') + ').' : 'Provider-only duties are not asked of us; deployer duties under Art. 26 are.'));
     const tier = high ? 1 : impactTier;
     if (high && impactTier > 1) reasons.push('Regulation sets the floor: tier raised to Critical.');
     if (!high && tier === 1) reasons.push('Not high-risk in law, but Critical on impact. Regulation is the floor, not the ceiling.');
@@ -144,6 +159,7 @@
   const isAgent = c => !!(c.triage.result && c.triage.result.flags.agent);
   const reviewDays = c => Math.round(P.tiers[c.triage.result.tier].reviewDays * (isAgent(c) ? P.agentTrack.reviewFactor : 1));
   const goLiveChecks = c => P.goLiveChecks.filter(k => !k.if || c.triage.result.flags[k.if]);
+  const retireChecks = c => P.retireChecks.filter(k => !k.if || c.triage.result.flags[k.if]);
   const fastLane = c => c.triage.result.tier === 3 && !isAgent(c);
   const pendingApprovers = c => approvers(c).filter(r => !c.signoffs[r]);
 
@@ -314,9 +330,12 @@
       log(c, role, 'Material change declared', p.reason.trim() + ' The change may not ship until re-approved.', now);
     },
     retire(c, role, p, now) {
-      need(String(p.note || '').trim(), 'Record how it was decommissioned (access revoked, data disposed or archived).');
-      c.status = 'retired';
-      log(c, role, 'Retired', p.note.trim(), now);
+      const open = retireChecks(c).filter(k => !(p.checks || []).includes(k.id));
+      need(!open.length, 'Retirement gate: confirm ' + open.map(k => '“' + k.text + '”').join(', ') + '.');
+      need(String(p.note || '').trim(), 'Record why it is being retired and what replaces it.');
+      c.status = 'retired'; c.retiredAt = now;
+      log(c, role, 'Retired', p.note.trim() + ' Confirmed: ' + retireChecks(c).map(k => k.text).join('; ') + '.', now);
+      move(c, 'retired', now);
     },
   };
 
@@ -330,7 +349,7 @@
     return c;
   }
 
-  const ENGINE = { DAY, RULES, sha256, classify, requiredControls, controlsComplete, approvers, pendingApprovers, isAgent, reviewDays, goLiveChecks, fastLane, createCase, act, verifyChain, roleName };
+  const ENGINE = { DAY, RULES, sha256, classify, requiredControls, controlsComplete, approvers, pendingApprovers, isAgent, reviewDays, goLiveChecks, retireChecks, fastLane, createCase, act, verifyChain, roleName };
   if (typeof module !== 'undefined' && module.exports) module.exports = ENGINE;
   else root.ENGINE = ENGINE;
 })(typeof window !== 'undefined' ? window : globalThis);

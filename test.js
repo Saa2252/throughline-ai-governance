@@ -8,7 +8,7 @@ let passed = 0;
 const test = (name, fn) => { fn(); passed++; console.log('  ✓ ' + name); };
 const imp = (decision, autonomy, data, scale, reversibility) => ({ decision, autonomy, data, scale, reversibility });
 const ans = o => Object.assign({ prohibited: [], areas: [], profiling: false, narrow: false, transparency: [], tools: [], impact: imp(0, 0, 0, 0, 0) }, o);
-const intake = { name: 'X', kind: 'AI system or model (produces output for people)', unit: 'U', purpose: 'P', affected: 'A', source: 'Built in-house', vendor: '' };
+const intake = { name: 'X', kind: 'AI system or model (produces output for people)', euRole: 'Deployer (we use AI someone else built)', unit: 'U', purpose: 'P', affected: 'A', source: 'Built in-house', vendor: '' };
 const fresh = () => E.act(E.createCase('UC-1', 'owner', 1), 'submitIntake', 'owner', intake, 2);
 
 console.log('Hashing');
@@ -78,6 +78,41 @@ test('widening an agent after approval voids the approval', () => {
   assert.strictEqual(c.stage, 'monitor');
   E.act(c, 'materialChange', 'owner', { reason: 'Adding a tool to grant admin rights' });
   assert.deepStrictEqual([c.stage, c.triage.confirmed, c.decision], ['triage', false, null]);
+});
+
+test('combination rule: sensitive data + untrusted input + a way out is Elevated, with no consequential tool', () => {
+  const base = { tools: ['read', 'untrusted', 'outbound'], impact: imp(0, 0, 2, 0, 0) };
+  const r = E.classify(ans(base), intake);
+  assert.deepStrictEqual([r.tier, r.flags.agent], [2, true]);
+  assert.strictEqual(E.classify(ans({ tools: ['read', 'outbound'], impact: imp(0, 0, 2, 0, 0) }), intake).tier, 3);
+  assert.strictEqual(E.classify(ans({ tools: ['read', 'untrusted', 'outbound'], impact: imp(0, 0, 1, 0, 0) }), intake).tier, 3);
+});
+
+console.log('Provider and deployer');
+const hi = ans({ areas: ['employment'], profiling: true, impact: imp(2, 0, 2, 3, 2) });
+const idsFor = (a, euRole) => { const c = E.act(E.createCase('UC-1', 'owner', 1), 'submitIntake', 'owner', Object.assign({}, intake, { euRole }), 2); E.act(c, 'submitTriage', 'owner', a, 3); return E.requiredControls(c).map(k => k.id); };
+test('a deployer of a high-risk system gets deployer duties, not provider ones', () => {
+  const ids = idsFor(hi, 'Deployer (we use AI someone else built)');
+  assert.ok(ids.includes('D1') && ids.includes('D2'));
+  assert.ok(!ids.includes('K4') && !ids.includes('K6') && !ids.includes('P1'));
+});
+test('a provider gets data governance, technical documentation and conformity assessment', () => {
+  const ids = idsFor(hi, 'Provider (we build it or place it on the market under our name)');
+  assert.ok(ids.includes('K4') && ids.includes('K6') && ids.includes('P1'));
+  assert.ok(!ids.includes('D1') && !ids.includes('D2'));
+});
+test('Art. 25: a deployer who modifies or rebrands the system picks up provider duties as well', () => {
+  const ids = idsFor(Object.assign({}, hi, { modified: true }), 'Deployer (we use AI someone else built)');
+  assert.ok(['K4', 'K6', 'P1', 'D1', 'D2'].every(id => ids.includes(id)));
+});
+
+console.log('Retirement');
+test('retiring needs every decommissioning check, including credential revocation for agents', () => {
+  const c = SEED(Date.now()).find(x => x.intake.name === 'IT helpdesk agent');
+  assert.throws(() => E.act(c, 'retire', 'owner', { checks: ['access', 'data', 'users', 'log'], note: 'done' }), /credentials/);
+  E.act(c, 'retire', 'owner', { checks: ['access', 'creds', 'data', 'users', 'log'], note: 'Replaced' });
+  assert.deepStrictEqual([c.status, c.stage, E.verifyChain(c).ok], ['retired', 'retired', true]);
+  assert.throws(() => E.act(c, 'logIncident', 'owner', { text: 'x' }), /retired/);
 });
 
 console.log('Gates and decision rights');

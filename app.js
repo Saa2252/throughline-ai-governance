@@ -1,6 +1,6 @@
 /* Throughline — UI. Renders state, forwards every action to the engine, shows the engine's refusals verbatim. */
 (function () {
-  const P = window.POLICY, E = window.ENGINE, DAY = E.DAY, KEY = 'throughline.v1';
+  const P = window.POLICY, E = window.ENGINE, DAY = E.DAY, KEY = 'throughline.v2';
   const app = document.getElementById('app');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
   const fmt = t => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
@@ -8,7 +8,11 @@
   const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
   const stageOf = id => P.stages.find(s => s.id === id);
   const REG = { prohibited: 'Prohibited practice', high: 'High-risk', limited: 'Transparency duties', minimal: 'Minimal risk' };
-  const FW = { nist: 'NIST AI RMF', iso: 'ISO/IEC 42001', eu: 'EU AI Act', other: '' };
+  const FW = { nist: 'NIST AI RMF 1.0', iso: 'ISO/IEC 42001:2023', eu: 'EU AI Act, Regulation (EU) 2024/1689', other: '' };
+  const REPO = 'https://github.com/Saa2252/throughline-ai-governance';
+  const LINES = { '1st line': 'First line of defence: the team that builds or uses the AI and owns its risk.', '2nd line': 'Second line of defence: independent oversight (risk, privacy, security, legal) that challenges the first line.', 'Executive': 'Senior decision-makers who accept the highest risks on behalf of the organisation.' };
+  const byName = n => S.cases.find(c => c.intake.name === n);
+  const euRoleLabel = c => { const f = c.triage.result && c.triage.result.flags; return f ? (f.provider && f.deployer ? 'Provider and deployer' : f.provider ? 'Provider' : 'Deployer') + (f.art25 ? ' (via Art. 25)' : '') : (c.intake.euRole || '').split(' (')[0]; };
 
   let S = load();
   function load() {
@@ -48,22 +52,55 @@
   const reviewOverdue = c => c.status === 'active' && c.stage === 'monitor' && c.monitor.nextReview < Date.now();
   function closedLabel(c) { return { blocked: 'Blocked', rejected: 'Rejected', retired: 'Retired' }[c.status]; }
 
+  // ---------- tour, glossary, about ----------
+  function tour() {
+    if (S.tourHidden) return '<p class="tourback"><button class="link" data-action="tourshow">Show the 60-second tour and glossary</button></p>';
+    const steps = [
+      ['Watch a gate say no', 'Try to approve a Critical use case as its own owner. The engine refuses and tells you why.', 'tourself', 'Try to self-approve'],
+      ['Be the second line', 'Open the procurement agent as the AI Governance Lead and confirm its tier. The control list builds itself from the answers.', 'tourtriage', 'Open the agent'],
+      ['Tamper with the record', 'Quietly rewrite one old audit entry and watch the hash chain break.', 'tourtamper', 'Rewrite an entry'],
+    ];
+    const terms = [
+      ['T0 to T3', 'The risk tier. T3 Standard gets a fast lane, T2 Elevated a targeted review, T1 Critical the full treatment. T0 is prohibited outright.'],
+      ['G1 to G5', 'Gates. A use case cannot move on until the gate’s question has been answered.'],
+      ['1st line, 2nd line', 'From the “three lines of defence” model. The 1st line builds or uses the AI and owns the risk. The 2nd line is independent oversight (risk, privacy, security, legal) that challenges it. The 3rd line, internal audit, is not modelled here.'],
+      ['Control', 'A safeguard that has to be in place, such as a security review or a kill switch.'],
+      ['Attestation', 'A named person stating on the record that a control is in place, and pointing to the evidence.'],
+      ['Agent', 'AI that takes actions through tools (sends, writes, buys, runs code) instead of only producing output for a person.'],
+    ];
+    return '<section class="tour"><div class="tourhead"><h3>New here? Three things to try</h3><button class="link" data-action="tourhide">Hide</button></div><div class="toursteps">' +
+      steps.map((s, i) => '<div><span>' + (i + 1) + '</span><b>' + s[0] + '</b><p>' + s[1] + '</p><button class="btn small" data-action="' + s[2] + '">' + s[3] + ' →</button></div>').join('') + '</div>' +
+      '<details class="gloss"><summary>What the labels mean</summary><dl>' + terms.map(t => '<dt>' + t[0] + '</dt><dd>' + t[1] + '</dd>').join('') + '</dl></details></section>';
+  }
+  function about() {
+    return '<section class="about"><b>About.</b> Most AI governance lives in a policy document and a risk spreadsheet. Throughline is an open reference implementation of what sits between them: the workflow that makes the policy happen. ' +
+      'Built by <a href="https://github.com/Saa2252" target="_blank" rel="noopener">Saa2252</a>. <a href="' + REPO + '" target="_blank" rel="noopener">Source on GitHub</a>. All use cases shown are fictional.</section>';
+  }
+  function tamper(c) {
+    if (c._tamper || c.log.length < 2) return;
+    const i = Math.min(3, c.log.length - 2);
+    c._tamper = { i, detail: c.log[i].detail };
+    c.log[i].detail = 'Approved with no conditions (rewritten later)';
+    save();
+  }
+
   // ---------- pipeline ----------
   function pipeline() {
     const active = S.cases.filter(c => c.status === 'active');
-    const closed = S.cases.filter(c => c.status !== 'active');
+    const closed = S.cases.filter(c => c.status === 'blocked' || c.status === 'rejected');
     const decided = S.cases.filter(c => c.decision && c.decision.outcome !== 'Rejected').map(c => (c.decision.at - c.createdAt) / DAY).sort((a, b) => a - b);
     const median = decided.length ? Math.round(decided[Math.floor((decided.length - 1) / 2)]) : null;
     const stats = [
       [active.filter(c => c.stage !== 'monitor').length, 'in the pipeline'],
       [active.filter(c => c.stage === 'monitor').length, 'live and monitored'],
-      [closed.filter(c => c.status !== 'retired').length, 'stopped by a gate'],
+      [closed.length, 'stopped by a gate'],
       [active.filter(reviewOverdue).length, 'overdue for review', active.some(reviewOverdue)],
       [median == null ? '–' : median + 'd', 'median intake → decision'],
     ];
     const card = c => {
       const flags = [];
       if (E.isAgent(c)) flags.push('<span class="flag agent">Agent</span>');
+      if (c._tamper) flags.push('<span class="flag warn">Log tampered</span>');
       if (c.rereview) flags.push('<span class="flag warn">Re-review: ' + (c.rereview.kind === 'incident' ? 'incident' : 'change') + '</span>');
       if (reviewOverdue(c)) flags.push('<span class="flag warn">Review overdue ' + daysSince(c.monitor.nextReview) + 'd</span>');
       if (c.stage === 'triage' && c.triage.result && !c.triage.confirmed) flags.push('<span class="flag">Awaiting confirmation</span>');
@@ -76,13 +113,13 @@
     return '<section class="hero"><div><h1>Every AI use case, one front door.</h1>' +
       '<p>From first idea to retirement: tiered by risk, gated by evidence, decided by named people, and recorded so it can be proven later.</p></div>' +
       gate(['owner'], '<button class="btn primary" data-action="new">+ Register a use case</button>') + '</section>' +
-      '<section class="stats">' + stats.map(s => '<div class="stat' + (s[2] ? ' alert' : '') + '"><b>' + s[0] + '</b><span>' + s[1] + '</span></div>').join('') + '</section>' +
+      tour() + '<section class="stats">' + stats.map(s => '<div class="stat' + (s[2] ? ' alert' : '') + '"><b>' + s[0] + '</b><span>' + s[1] + '</span></div>').join('') + '</section>' +
       '<section class="board">' + P.stages.map(st => {
-        const list = active.filter(c => c.stage === st.id);
+        const list = S.cases.filter(c => c.stage === st.id && (c.status === 'active' || c.status === 'retired'));
         return '<div class="col"><h3><span class="g">' + st.gate + '</span>' + st.name + '<em>' + list.length + '</em></h3><p class="q">' + st.question + '</p>' +
           (list.map(card).join('') || '<div class="empty">Nothing here</div>') + '</div>';
       }).join('') + '</section>' +
-      (closed.length ? '<section class="closed"><h3>Closed</h3><div class="closedrow">' + closed.map(card).join('') + '</div></section>' : '');
+      (closed.length ? '<section class="closed"><h3>Stopped at a gate</h3><div class="closedrow">' + closed.map(card).join('') + '</div></section>' : '') + about();
   }
 
   // ---------- case view ----------
@@ -90,7 +127,7 @@
     const idx = P.stages.findIndex(s => s.id === c.stage);
     return '<ol class="stepper">' + P.stages.map((s, i) => {
       const skipped = s.id === 'golive' && c.triage.confirmed && tierOf(c) !== 0 && E.fastLane(c);
-      const cls = skipped ? 'skip' : i < idx ? 'done' : i === idx ? (c.status === 'active' ? 'now' : 'halt') : '';
+      const cls = skipped ? 'skip' : i < idx ? 'done' : i === idx ? (c.status === 'active' || c.status === 'retired' ? 'now' : 'halt') : '';
       return '<li class="' + cls + '"><span class="g">' + s.gate + '</span><b>' + s.name + '</b><small>' + (skipped ? 'Skipped: fast lane' : s.question) + '</small></li>';
     }).join('') + '</ol>';
   }
@@ -137,7 +174,8 @@
     return banner + '<form data-form="triage"><fieldset><legend>1 · Is it something we must not do?</legend><p class="hint">Any tick here ends the workflow. These are the EU AI Act’s prohibited practices.</p>' + box('prohibited', 'prohibited') + '</fieldset>' +
       '<fieldset><legend>2 · Does it fall in a high-risk area?</legend>' + box('areas', 'areas') +
       '<div class="sub"><p>If you ticked an area: does it profile individuals? ' + yn('profiling', a.profiling) + '</p>' +
-      '<p>Is it limited to a narrow procedural or preparatory task that does not materially influence the outcome? ' + yn('narrow', a.narrow) + ' <i>Art. 6(3)</i></p></div></fieldset>' +
+      '<p>Is it limited to a narrow procedural or preparatory task that does not materially influence the outcome? ' + yn('narrow', a.narrow) + ' <i>Art. 6(3)</i></p></div>' +
+      '<div class="sub"><p>Have we substantially modified a third-party AI system, changed what it is meant for, or put our own name on it? ' + yn('modified', a.modified) + ' <i>Art. 25: this makes us its provider</i></p></div></fieldset>' +
       '<fieldset><legend>3 · Do transparency duties apply?</legend>' + box('transparency', 'transparency') + '</fieldset>' +
       '<fieldset><legend>4 · How much could it matter?</legend><p class="hint">Five factors, scored 0–3. This applies to every use case, regulated or not.</p><div class="impact">' +
       P.triage.impact.map(f => '<div class="field"><label for="i_' + f.id + '">' + f.name + '</label><select name="i_' + f.id + '" id="i_' + f.id + '">' +
@@ -149,7 +187,7 @@
   function readTriage(form) {
     const fd = new FormData(form), impact = {};
     P.triage.impact.forEach(f => { impact[f.id] = +(fd.get('i_' + f.id) || 0); });
-    return { prohibited: fd.getAll('prohibited'), areas: fd.getAll('areas'), profiling: fd.get('profiling') === 'yes', narrow: fd.get('narrow') === 'yes', transparency: fd.getAll('transparency'), tools: fd.getAll('tools'), impact };
+    return { prohibited: fd.getAll('prohibited'), areas: fd.getAll('areas'), profiling: fd.get('profiling') === 'yes', narrow: fd.get('narrow') === 'yes', modified: fd.get('modified') === 'yes', transparency: fd.getAll('transparency'), tools: fd.getAll('tools'), impact };
   }
 
   function assessPanel(c) {
@@ -179,7 +217,7 @@
             '<button class="btn primary small" name="decision" value="approve">Approve</button><button class="btn small" name="decision" value="return">Return for rework</button>' +
             '<button class="btn small danger" name="decision" value="reject">Reject</button></div></form>'
         : '<span class="pending">Pending <button class="btn small" data-action="role" data-role="' + r + '">Act as</button></span>';
-      return '<div class="approver' + (s ? ' ok' : '') + '"><div><strong>' + esc(P.roles[r].name) + '</strong><small>' + P.roles[r].line + '</small></div>' + right + '</div>';
+      return '<div class="approver' + (s ? ' ok' : '') + '"><div><strong>' + esc(P.roles[r].name) + '</strong><small title="' + esc(LINES[P.roles[r].line]) + '">' + P.roles[r].line + '</small></div>' + right + '</div>';
     }).join('');
     return '<p class="hint">' + t.name + ' tier needs ' + plural(E.approvers(c).length, 'approver') + (E.isAgent(c) && tierOf(c) === 3 ? ' (Security is added for every agent)' : '') + '. Target: ' + plural(t.slaDays, 'day') + '. Waiting ' + plural(waited, 'day') +
       (waited > t.slaDays ? ' <span class="flag warn">over target</span>' : '') + '. The use-case owner is never on this list.</p>' + rows;
@@ -208,12 +246,17 @@
       '<p class="hint">Anyone can raise an incident. A serious one pauses use and sends the case back to triage.</p>' +
       '<h4>Change and retirement</h4>' + (E.isAgent(c) ? '<p class="hint">For an agent, a new tool, a wider permission or a higher autonomy level is a material change. The approval covers the manifest shown in the agent profile and nothing wider.</p>' : '') +
       gate(['owner', 'gov'], '<form data-form="change" class="inline"><input type="text" name="reason" placeholder="New model, new data, new purpose, new audience…"><button class="btn small">Declare material change</button></form>' +
-        '<form data-form="retire" class="inline"><input type="text" name="note" placeholder="Access revoked, data disposed or archived…"><button class="btn small danger">Retire</button></form>');
+        '<details class="retire"><summary>Retire this use case</summary><form data-form="retire">' +
+        E.retireChecks(c).map(k => '<label class="check"><input type="checkbox" name="checks" value="' + k.id + '"><span>' + k.text + '</span></label>').join('') +
+        '<div class="inline"><input type="text" name="note" placeholder="Why is it being retired, and what replaces it?"><button class="btn small danger">Retire</button></div></form></details>');
   }
 
   function auditPanel(c) {
     const v = E.verifyChain(c);
     return '<div class="chain ' + (v.ok ? 'ok' : 'bad') + '">' + (v.ok ? '✓ Chain intact · ' + v.entries + (v.entries === 1 ? ' entry' : ' entries') + ' · head ' + v.head.slice(0, 12) + '…' : '✗ Chain broken at entry ' + v.brokenAt) + '</div>' +
+      '<p class="hint">Tamper-evident, not tamper-proof. This log lives in your browser, so someone could rewrite it and recompute every hash. It only proves something once the head hash is kept somewhere the editor cannot reach.</p>' +
+      '<div class="chainbtns"><button class="btn small" data-action="checkpoint">Export checkpoint</button><button class="btn small" data-action="copyhash">Copy head hash</button>' +
+      (c._tamper ? '<button class="btn small primary" data-action="untamper">Undo the rewrite</button>' : '<button class="btn small ghost" data-action="tamper">Rewrite an entry (demo)</button>') + '</div>' +
       '<ol class="audit">' + c.log.slice().reverse().map(e => '<li><time>' + fmt(e.ts) + '</time><b>' + esc(e.action) + '</b><span class="who">' + esc(e.role === 'system' ? 'System' : E.roleName(e.role)) + '</span>' +
         (e.detail ? '<p>' + esc(e.detail) + '</p>' : '') + '<code title="SHA-256 of this entry chained to the previous one">' + e.hash.slice(0, 16) + '</code></li>').join('') + '</ol>';
   }
@@ -224,15 +267,15 @@
     let body;
     if (c.status === 'blocked') body = '<div class="banner stop"><b>Blocked.</b> This use case matches a prohibited practice. There is no approval route; the record is kept so the decision can be shown later.</div>' + resultCard(r);
     else if (c.status === 'rejected') body = '<div class="banner stop"><b>Rejected</b> on ' + fmt(c.decision.at) + '. See the audit trail for the rationale.</div>';
-    else if (c.status === 'retired') body = '<div class="banner"><b>Retired.</b> Kept in the inventory as a closed record.</div>';
+    else if (c.status === 'retired') body = '<div class="banner"><b>Retired' + (c.retiredAt ? ' on ' + fmt(c.retiredAt) : '') + '.</b> Switched off through the retirement checklist. The decision record and audit trail are kept.</div>' + (r ? resultCard(r) : '');
     else body = '<div class="stagehead"><span class="g">' + st.gate + '</span><div><h2>' + st.name + '</h2><p>' + st.question + '</p></div><span class="refs">' + refs(st.refs) + '</span></div>' + panels[c.stage](c);
-    const duties = r ? [['High-risk obligations', r.regClass === 'high'], ['AI disclosure', r.flags.art50], ['Personal data', r.flags.personalData], ['Agent track', r.flags.agent], ['Third-party', r.flags.thirdParty], ['Art. 6(3) exemption', r.flags.exemption]].filter(x => x[1]) : [];
+    const duties = r ? [['High-risk obligations', r.regClass === 'high'], ['AI disclosure', r.flags.art50], ['Personal data', r.flags.personalData], ['Agent track', r.flags.agent], ['Third-party', r.flags.thirdParty], ['Became provider (Art. 25)', r.flags.art25], ['Art. 6(3) exemption', r.flags.exemption]].filter(x => x[1]) : [];
     const fact = (k, v) => v ? '<div><small>' + k + '</small><span>' + v + '</span></div>' : '';
     return '<a class="back" href="#/">← Pipeline</a><div class="casehead"><div><span class="cid">' + c.id + '</span><h1>' + esc(c.intake.name || 'New use case') + '</h1>' +
       '<p>' + esc(c.intake.purpose || 'Not described yet.') + '</p></div><div class="headbadges">' + tierBadge(c) +
       (c.status !== 'active' ? '<span class="badge t0">' + closedLabel(c) + '</span>' : '') + (c.monitor && c.monitor.paused ? '<span class="badge t1">Use paused</span>' : '') + '</div></div>' +
       stepper(c) + '<div class="split"><section class="panel">' + body + '</section><aside>' +
-      '<section class="panel facts"><h3>At a glance</h3>' + fact('Business unit', esc(c.intake.unit)) + fact('Affected', esc(c.intake.affected)) + fact('Sourcing', esc(c.intake.source)) + fact('Model / vendor', esc(c.intake.vendor)) +
+      '<section class="panel facts"><h3>At a glance</h3>' + fact('Business unit', esc(c.intake.unit)) + fact('Affected', esc(c.intake.affected)) + fact('Sourcing', esc(c.intake.source)) + fact('EU AI Act role', esc(euRoleLabel(c))) + fact('Model / vendor', esc(c.intake.vendor)) +
       (r ? fact('Classification', REG[r.regClass]) + fact('Impact score', r.score + ' / 15') : '') + fact('Opened', fmt(c.createdAt)) + (c.decision ? fact('Decision', c.decision.outcome + ', ' + fmt(c.decision.at)) : '') +
       (duties.length ? '<div><small>Triggers</small><span>' + duties.map(d => '<span class="flag">' + d[0] + '</span>').join(' ') + '</span></div>' : '') +
       '<button class="btn small" data-action="record">Download decision record</button></section>' +
@@ -251,7 +294,7 @@
     P.intakeFields.forEach(f => L.push('- **' + f.label + ':** ' + (c.intake[f.id] || '–')));
     if (r) {
       L.push('', '## 2. Classification', '', '- **Tier:** ' + P.tiers[r.tier].short + ' ' + P.tiers[r.tier].name + (c.triage.confirmed ? ' (confirmed by second line)' : ' (proposed, not yet confirmed)'),
-        '- **Regulatory class:** ' + REG[r.regClass], '- **Impact score:** ' + r.score + '/15', '', 'Reasoning:', '');
+        '- **Regulatory class:** ' + REG[r.regClass], '- **EU AI Act role:** ' + euRoleLabel(c), '- **Impact score:** ' + r.score + '/15', '', 'Reasoning:', '');
       r.reasons.forEach(x => L.push('- ' + x));
       if (r.agent) L.push('', '**Agent profile.** Autonomy: ' + P.agentTrack.levels[r.agent.autonomy] + '. Tools: ' + (r.agent.tools.map(id => P.triage.tools.find(x => x.id === id).text).join('; ') || 'none declared') + '. Review every ' + E.reviewDays(c) + ' days.');
       const req = E.requiredControls(c);
@@ -298,21 +341,33 @@
         (t ? P.controls.filter(k => k.tiers.includes(t) && !k.if).length + ' + conditional' : '–') + '</td><td>' + (x.slaDays ? plural(x.slaDays, 'day') : '–') + '</td><td>' + (x.reviewDays ? 'Every ' + x.reviewDays + ' days' : '–') + '</td></tr>'; }).join('');
     return '<section class="hero"><div><h1>How it governs</h1><p>This page is generated from <code>policy.js</code>, the same file the engine enforces. Change the policy and both the rules and this description change together.</p></div></section>' +
       '<section class="principles">' + principles.map((p, i) => '<div><span>' + (i + 1) + '</span><h3>' + p[0] + '</h3><p>' + p[1] + '</p></div>').join('') + '</section>' +
-      '<section class="panel"><h2>Lifecycle and gates</h2><div class="tablewrap"><table><thead><tr><th>Gate</th><th>Stage</th><th>The question it answers</th><th>Who</th><th>Framework anchors</th></tr></thead><tbody>' +
+      '<section class="panel"><h2>Lifecycle and gates</h2><p class="hint">Reading the anchors: <b>NIST</b> is the NIST AI Risk Management Framework 1.0. <b>ISO</b> is ISO/IEC 42001:2023, by clause number or Annex A control group. <b>EU</b> is the EU AI Act, Regulation (EU) 2024/1689; where a duty falls on only one side, the anchor says provider or deployer.</p><div class="tablewrap"><table><thead><tr><th>Gate</th><th>Stage</th><th>The question it answers</th><th>Who</th><th>Framework anchors</th></tr></thead><tbody>' +
       P.stages.map(s => '<tr><td><span class="g">' + s.gate + '</span></td><td><b>' + s.name + '</b></td><td>' + s.question + '</td><td>' + s.who + '</td><td class="refs">' + refs(s.refs) + '</td></tr>').join('') + '</tbody></table></div></section>' +
       '<section class="panel"><h2>Tiers</h2><p class="hint">Impact score 0–15 across five factors: ' + P.scoring.tier2From + '+ is Elevated, ' + P.scoring.tier1From + '+ is Critical. Maximum autonomy or effect on people rules out the fast lane. EU AI Act high-risk is always Critical.</p>' +
-      '<div class="tablewrap"><table><thead><tr><th>Tier</th><th>Path</th><th>Approvers</th><th>Controls</th><th>Decision target</th><th>Review</th></tr></thead><tbody>' + tiers + '</tbody></table></div></section>' +
+      '<div class="tablewrap"><table><thead><tr><th>Tier</th><th>Path</th><th>Approvers</th><th>Controls</th><th>Decision target</th><th>Review</th></tr></thead><tbody>' + tiers + '</tbody></table></div>' +
+      '<h3 class="subhead">The five impact factors</h3><div class="tablewrap"><table><thead><tr><th>Factor</th><th>0</th><th>1</th><th>2</th><th>3</th></tr></thead><tbody>' +
+      P.triage.impact.map(f => '<tr><td><b>' + f.name + '</b></td>' + f.options.map(o => '<td>' + o + '</td>').join('') + '</tr>').join('') + '</tbody></table></div>' +
+      '<p class="hint">The score measures how much it could matter, not how likely it is to go wrong. Likelihood guessed at intake is the easiest number to talk down, so it is left out of tiering on purpose and tested in assessment instead.</p></section>' +
+      '<section class="panel"><h2>Provider or deployer</h2><p class="hint">Most organisations use AI someone else built. Intake asks which side we are on and the controls follow.</p><div class="tablewrap"><table><thead><tr><th>Our role</th><th>What is asked at Critical tier</th></tr></thead><tbody>' +
+      [['Deployer', 'deployer'], ['Provider', 'provider'], ['Provider of a high-risk system', 'providerHigh']].map(x => '<tr><td><b>' + x[0] + '</b></td><td>' + P.controls.filter(k => k.if === x[1]).map(k => k.id + ' ' + k.title + ' <span class="refs">' + refs({ eu: k.refs.eu }) + '</span>').join('<br>') + '</td></tr>').join('') +
+      '<tr><td><b>Became a provider</b></td><td>Triage asks whether we substantially modified a third-party system, changed its purpose or put our name on it. If so, Art. 25 makes us its provider and the provider controls apply.</td></tr></tbody></table></div></section>' +
       '<section class="panel"><h2>Agent track</h2><p class="hint">Same six gates. A use case is on this track if it is registered as an agent, acts without per-step human approval, or holds a consequential tool, so it cannot be avoided by calling an agent something else.</p>' +
       '<div class="tablewrap"><table><thead><tr><th>Gate</th><th>What changes for an agent</th></tr></thead><tbody>' +
-      [['G2', 'Triage records the tool manifest and the autonomy level (' + P.agentTrack.levels.join(' · ') + '). Consequential tools (' + P.triage.tools.filter(t => t.high).map(t => t.text.charAt(0).toLowerCase() + t.text.slice(1)).join('; ') + ') make it at least Elevated; consequential tools at L2 or above make it Critical.'],
+      [['G2', 'Triage records the tool manifest and the autonomy level (' + P.agentTrack.levels.join(' · ') + '). Consequential tools (' + P.triage.tools.filter(t => t.high).map(t => t.text.charAt(0).toLowerCase() + t.text.slice(1)).join('; ') + ') make it at least Elevated; consequential tools at L2 or above make it Critical. Combination rule: sensitive data, plus content it does not control, plus any way to send data out, is at least Elevated even when no single tool is consequential.'],
         ['G3', 'Agent controls are added: ' + P.controls.filter(k => /^agent/.test(k.if || '')).map(k => k.id + ' ' + k.title).join(', ') + '.'],
         ['G4', P.roles[P.agentTrack.extraApprover].name + ' always signs. No agent is approved on a single signature, even at Standard tier. The approval is for that manifest at that autonomy level.'],
         ['G5', 'No fast-lane skip. Every agent passes go-live, with an extra check: ' + P.goLiveChecks.find(k => k.if === 'agent').text.toLowerCase() + '.'],
         ['↻', 'Reviewed at ' + (1 / P.agentTrack.reviewFactor) + '× the tier frequency. A new tool, wider permission or higher autonomy is a material change: approvals are void and triage reopens.']]
         .map(x => '<tr><td><span class="g">' + x[0] + '</span></td><td>' + x[1] + '</td></tr>').join('') + '</tbody></table></div></section>' +
-      '<section class="panel"><h2>Control library and crosswalk</h2><div class="tablewrap"><table><thead><tr><th>ID</th><th>Control</th><th>Tiers</th><th>Applies when</th><th>Attested by</th><th>Framework anchors</th></tr></thead><tbody>' +
+      '<section class="panel"><details class="lib"><summary><h2>Control library and crosswalk</h2><span class="hint">' + P.controls.length + ' controls. Click to expand.</span></summary><div class="tablewrap"><table><thead><tr><th>ID</th><th>Control</th><th>Tiers</th><th>Applies when</th><th>Attested by</th><th>Framework anchors</th></tr></thead><tbody>' +
       P.controls.map(k => '<tr><td><span class="kid">' + k.id + '</span></td><td><b>' + k.title + '</b><br><small>' + k.evidence + '</small></td><td>' + k.tiers.map(t => P.tiers[t].short).join(' ') + '</td><td>' +
-        ({ thirdParty: 'Third-party sourced', art50: 'Transparency duty', agent: 'Agent track', agentState: 'Agent with memory or sub-agents', exemption: 'Art. 6(3) claimed', personalData: 'Personal data' }[k.if] || 'Always') + '</td><td>' + P.roles[k.by || 'owner'].name + '</td><td class="refs">' + refs(k.refs) + '</td></tr>').join('') + '</tbody></table></div></section>';
+        ({ thirdParty: 'Third-party sourced', art50: 'Transparency duty', agent: 'Agent track', agentState: 'Agent with memory or sub-agents', provider: 'We are the provider', deployer: 'We are the deployer', providerHigh: 'Provider of a high-risk system', exemption: 'Art. 6(3) claimed', personalData: 'Personal data' }[k.if] || 'Always') + '</td><td>' + P.roles[k.by || 'owner'].name + '</td><td class="refs">' + refs(k.refs) + '</td></tr>').join('') + '</tbody></table></div></details></section>' +
+      '<section class="panel"><h2>What a workflow cannot do alone</h2><dl class="limits">' +
+      [['Finding what skips the front door', 'A workflow only governs what enters it. In practice the door needs feeders: a question in procurement and vendor onboarding, AI flagged in single sign-on app approvals, and a periodic sweep of software already in use for newly switched-on AI features. Whatever is found enters at Intake like anything else.'],
+        ['Committee load', 'Sending every Critical decision to a committee does not scale. Two usual answers: batch decisions into scheduled sittings, and let the committee delegate repeat patterns it has already approved to the AI Governance Lead.'],
+        ['One model, many use cases', 'This tool governs use cases. A model that sits under several of them also needs its own inventory entry so a model-level change can reopen every use case built on it. That link is not modelled here.'],
+        ['Legal classification', 'The triage questions are a screening aid. They simplify the legal tests and do not cover general-purpose AI model obligations.']]
+        .map(x => '<dt>' + x[0] + '</dt><dd>' + x[1] + '</dd>').join('') + '</dl></section>';
   }
 
   // ---------- routing and events ----------
@@ -344,6 +399,26 @@
     else if (a === 'reset') { if (confirm('Discard all changes and reload the demo portfolio?')) { S = { cases: window.SEED(Date.now()), role: 'owner' }; save(); location.hash = '#/'; render(); } }
     else if (a === 'export') download('throughline-register.json', JSON.stringify({ policyVersion: P.version, exportedAt: new Date().toISOString(), cases: S.cases }, null, 2), 'application/json');
     else if (a === 'record') download(id + '-decision-record.md', record(find(id)), 'text/markdown');
+    else if (a === 'tourhide' || a === 'tourshow') { S.tourHidden = a === 'tourhide'; save(); render(); }
+    else if (a === 'tourself' || a === 'tourtriage' || a === 'tourtamper') {
+      const c = byName(a === 'tourself' ? 'Credit limit recommendation' : a === 'tourtriage' ? 'Autonomous procurement agent' : 'Customer support assistant');
+      if (!c) return toast('That demo case is gone. Use “Reset demo” at the bottom of the page.', true);
+      S.role = a === 'tourtriage' ? 'gov' : 'owner';
+      if (a === 'tourtamper') tamper(c);
+      save(); location.hash = '#/case/' + c.id; render();
+      if (a === 'tourself') { try { E.act(c, 'sign', 'owner', { decision: 'approve' }, Date.now()); } catch (err) { toast('Refused: ' + err.message, true); } }
+      else if (a === 'tourtriage') toast('You are now the AI Governance Lead. Press “Confirm Critical tier”.');
+      else toast('One old entry was rewritten. Look at the audit trail: the chain is broken.', true);
+    }
+    else if (a === 'tamper') { tamper(find(id)); render(); toast('Entry rewritten. The chain no longer verifies.', true); }
+    else if (a === 'untamper') { const c = find(id); c.log[c._tamper.i].detail = c._tamper.detail; delete c._tamper; save(); render(); toast('Original entry restored. Chain intact.'); }
+    else if (a === 'copyhash' || a === 'checkpoint') {
+      const c = find(id), v = E.verifyChain(c);
+      if (!v.ok) return toast('The chain is broken at entry ' + v.brokenAt + '. There is no valid head hash to export.', true);
+      if (a === 'checkpoint') download(id + '-checkpoint.json', JSON.stringify({ useCase: id, name: c.intake.name, entries: v.entries, headHash: v.head, algorithm: 'SHA-256 hash chain', policyVersion: P.version, exportedAt: new Date().toISOString(), note: 'Store or sign this outside the system. Any later rewrite of the log will no longer reproduce this head hash.' }, null, 2), 'application/json');
+      else if (navigator.clipboard) navigator.clipboard.writeText(v.head).then(() => toast('Head hash copied'), () => toast(v.head));
+      else toast(v.head);
+    }
     else if (a === 'confirmTriage') run(id, a, {}, 'Classification confirmed');
     else if (a === 'reviseTriage') run(id, a, {});
     else if (a === 'submitAssessment') run(id, a, {}, 'Submitted for decision');
@@ -365,7 +440,7 @@
     else if (kind === 'review') run(id, 'completeReview', fd, 'Review recorded');
     else if (kind === 'incident') run(id, 'logIncident', fd, 'Incident logged');
     else if (kind === 'change') run(id, 'materialChange', fd, 'Re-review opened');
-    else if (kind === 'retire') run(id, 'retire', fd, 'Retired');
+    else if (kind === 'retire') run(id, 'retire', { note: fd.note, checks: new FormData(f).getAll('checks') }, 'Retired');
   });
 
   document.addEventListener('change', e => {

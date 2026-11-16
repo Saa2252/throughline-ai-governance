@@ -15,7 +15,7 @@
     <a href="#/policy" data-nav="policy">How it governs</a>
   </nav>
   <div class="acting">
-    <label for="role">Acting as</label>
+    <label for="role">Acting as <abbr title="Switch roles to see who is allowed to do what. 1st line: the team that owns the AI and its risk. 2nd line: independent oversight that challenges it.">?</abbr></label>
     <select id="role"></select>
   </div>
 </header>
@@ -23,7 +23,7 @@
 <footer class="foot">
   <span>Reference implementation, policy v<span id="pv"></span>. Demo data is fictional and stays in your browser.</span>
   <span>Not legal advice. Framework citations are pointers: verify against the source texts.</span>
-  <span><button class="link" data-action="export">Export register (JSON)</button> · <button class="link" data-action="reset">Reset demo</button></span>
+  <span><a href="https://github.com/Saa2252/throughline-ai-governance" target="_blank" rel="noopener">Source on GitHub</a> · <button class="link" data-action="export">Export register (JSON)</button> · <button class="link" data-action="reset">Reset demo</button></span>
 </footer>
 <div id="toast" role="status" aria-live="polite"></div>
 <script src="policy.js"></script>

@@ -9,7 +9,7 @@ No build step, no server, no dependencies. Open `index.html`, or host the folder
 
 ```bash
 python3 -m http.server 8765   # then open http://localhost:8765
-node test.js                  # 21 tests on the rules engine
+node test.js                  # 26 tests on the rules engine
 ```
 
 ## What it does
@@ -22,8 +22,9 @@ node test.js                  # 21 tests on the rules engine
 | G4 | Decision | Who accepts the risk? |
 | G5 | Go-live | Are the conditions actually met? |
 | ↻ | Monitoring | Is it still behaving, and still the same thing? |
+| END | Retired | Is it properly switched off? |
 
-The demo opens with nine fictional use cases spread across every stage, two of them agents, including one blocked as a prohibited practice and one that no regulation names but the workflow still treats as Critical. Use the **Acting as** switcher to play each role and try to break the rules: the engine will refuse and tell you why.
+The demo opens with ten fictional use cases spread across every stage, two of them agents, including one blocked as a prohibited practice and one that no regulation names but the workflow still treats as Critical. Use the **Acting as** switcher to play each role and try to break the rules: the engine will refuse and tell you why.
 
 ## Design decisions
 
@@ -50,9 +51,19 @@ A use case is on the agent track if it is registered as an agent, acts without p
 | G5 Go-live | No fast-lane skip, plus a check that production permissions match the approved manifest. |
 | ↻ Monitoring | Reviewed twice as often as the tier requires. A new tool, a wider permission or a higher autonomy level is a material change: approvals are void and triage reopens. |
 
+Tools are also judged in combination. An agent that handles sensitive data, takes in content it does not control and has any way to send data out is at least Elevated, even if no single tool on its list is consequential, because an injected instruction can turn that combination into data theft.
+
+## Provider or deployer
+
+Most organisations use AI someone else built, and the EU AI Act asks different things of each side. Intake records the role and the Critical-tier controls follow it: a deployer is asked to follow the provider's instructions, keep logs and check its input data (Art. 26); a provider is asked for data governance, technical documentation and, for high-risk systems, conformity assessment (Art. 10, 11, 43). Triage also asks whether a third-party system has been substantially modified, repurposed or rebranded, because Art. 25 then makes the organisation its provider.
+
+## Retirement
+
+Retiring a use case is a gate like the others: access removed, credentials revoked for agents, data deleted or archived, users told, and the record kept.
+
 ## Framework anchors
 
-Each stage and each of the 25 controls carries pointers to the frameworks it draws on:
+Each stage and each of the 28 controls carries pointers to the frameworks it draws on:
 
 - **NIST AI RMF 1.0** — Govern, Map, Measure, Manage subcategories
 - **ISO/IEC 42001:2023** — clauses 5–10 and Annex A control groups
@@ -76,5 +87,8 @@ These are anchors to start from, not a compliance mapping. Verify them against t
 
 - It is a reference implementation. State lives in the browser's local storage; there is no login, and the role switcher stands in for real identity and access control.
 - The hash chain makes tampering *evident*, not impossible. A production system would anchor the chain head somewhere the editor cannot reach.
-- The EU AI Act triage is a screening aid. It simplifies the legal tests and does not cover general-purpose AI model obligations or the provider/deployer split in detail.
+- The EU AI Act triage is a screening aid. It simplifies the legal tests and does not cover general-purpose AI model obligations.
+- A workflow only governs what enters it. Finding AI that skipped the front door needs feeders outside this tool: procurement, single sign-on app approvals, periodic sweeps.
+- It governs use cases, not models. One model under many use cases needs its own inventory entry; that link is not modelled.
+- Tiering scores impact, not likelihood, on purpose: likelihood guessed at intake is the easiest number to talk down.
 - Not legal advice.

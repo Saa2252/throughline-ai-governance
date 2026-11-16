@@ -4,7 +4,7 @@
    The engine (engine.js) enforces it; the UI (app.js) renders it. Neither hard-codes policy. */
 (function (root) {
   const POLICY = {
-    version: '1.0.0',
+    version: '1.1.0',
 
     roles: {
       owner:     { name: 'Use-case owner',            line: '1st line' },
@@ -25,7 +25,7 @@
         refs: { nist: ['MAP 5.1', 'GOVERN 1.3'], iso: ['6.1.2'], eu: ['Art. 5', 'Art. 6', 'Annex III', 'Art. 50'] } },
       { id: 'assess', name: 'Assessment', gate: 'G3', question: 'Is the evidence there?',
         who: 'Owner, Independent Validator',
-        refs: { nist: ['MEASURE'], iso: ['6.1.3', '6.1.4', '8.4'], eu: ['Art. 9–15'] } },
+        refs: { nist: ['MEASURE'], iso: ['6.1.3', '6.1.4', '8.4'], eu: ['Art. 9–15', 'Art. 26'] } },
       { id: 'decide', name: 'Decision', gate: 'G4', question: 'Who accepts the risk?',
         who: 'Approvers set by tier',
         refs: { nist: ['MANAGE 1.1', 'GOVERN 2.1'], iso: ['5.3'] } },
@@ -34,7 +34,10 @@
         refs: { nist: ['MANAGE 2.4'], iso: ['A.6.2'], eu: ['Art. 14', 'Art. 26'] } },
       { id: 'monitor', name: 'Monitoring', gate: '↻', question: 'Is it still behaving, and still the same thing?',
         who: 'Owner operates, Governance Lead reviews',
-        refs: { nist: ['MANAGE 4.1', 'GOVERN 1.5', 'GOVERN 1.7'], iso: ['9.1', '10.2'], eu: ['Art. 72', 'Art. 73'] } },
+        refs: { nist: ['MANAGE 4.1', 'GOVERN 1.5'], iso: ['9.1', '10.2'], eu: ['Art. 26(5)', 'Art. 72', 'Art. 73'] } },
+      { id: 'retired', name: 'Retired', gate: 'END', question: 'Is it properly switched off?',
+        who: 'Owner or Governance Lead',
+        refs: { nist: ['GOVERN 1.7'], iso: ['A.6.2'] } },
     ],
 
     tiers: {
@@ -48,7 +51,9 @@
     },
 
     // Impact score → tier. Regulation can only push the tier up from here.
-    scoring: { tier1From: 10, tier2From: 6, floorTier2If: ['decision', 'autonomy'] },
+    scoring: { tier1From: 10, tier2From: 6, floorTier2If: ['decision', 'autonomy'],
+      // Sensitive data + untrusted input + any way out = data can be stolen by prompt injection, whatever the single tools look like.
+      combination: { dataFrom: 2, tier: 2 } },
 
     triage: {
       prohibited: [
@@ -81,11 +86,14 @@
       tools: [
         { id: 'read',     text: 'Reads internal data or documents' },
         { id: 'write',    text: 'Writes to systems of record (CRM, ERP, HR, tickets)', high: true },
-        { id: 'comms',    text: 'Sends messages to people outside the organisation', high: true },
+        { id: 'comms',    text: 'Sends messages to people outside the organisation', high: true, out: true },
         { id: 'money',    text: 'Commits spend, moves money or signs up to terms', high: true },
-        { id: 'code',     text: 'Runs code or changes infrastructure and access', high: true },
+        { id: 'code',     text: 'Runs code or changes infrastructure and access', high: true, out: true },
         { id: 'delegate', text: 'Instructs or spawns other agents', state: true },
         { id: 'memory',   text: 'Keeps memory across sessions', state: true },
+        // Not consequential alone. Together with sensitive data they are: see scoring.combination.
+        { id: 'untrusted', text: 'Takes in content it does not control (emails, web pages, uploads, other agents’ output)', untrusted: true },
+        { id: 'outbound', text: 'Can send data out some other way (web requests, shared files, external tickets)', out: true },
       ],
       impact: [
         { id: 'decision', name: 'Effect on people',
@@ -157,28 +165,37 @@
         refs: { nist: ['MAP 3.5', 'MANAGE 2.4'], eu: ['Art. 14'] } },
       { id: 'E5', title: 'Monitoring plan', tiers: [1, 2],
         evidence: 'Metrics, thresholds, alert owner and review cadence.',
-        refs: { nist: ['MANAGE 4.1'], iso: ['9.1'], eu: ['Art. 72', 'Art. 26(5)'] } },
+        refs: { nist: ['MANAGE 4.1'], iso: ['9.1'], eu: ['Art. 26(5) deployer', 'Art. 72 provider'] } },
       { id: 'E6', title: 'Incident and rollback procedure', tiers: [1, 2],
         evidence: 'How to pull it, who to tell, and what counts as serious.',
-        refs: { nist: ['MANAGE 4.3'], iso: ['10.2'], eu: ['Art. 73'] } },
+        refs: { nist: ['MANAGE 4.3'], iso: ['10.2'], eu: ['Art. 26(5) deployer', 'Art. 73 provider'] } },
       { id: 'K1', title: 'AI system impact assessment', tiers: [1],
         evidence: 'Affected groups, foreseeable harms, mitigations. Doubles as the FRIA where Art. 27 applies.',
-        refs: { nist: ['MAP 5.1'], iso: ['6.1.4', 'A.5'], eu: ['Art. 27'] } },
+        refs: { nist: ['MAP 5.1'], iso: ['6.1.4', 'A.5'], eu: ['Art. 27 deployer'] } },
       { id: 'K2', title: 'Bias and fairness testing', tiers: [1],
         evidence: 'Performance broken down by relevant groups, with remediation where gaps exist.',
-        refs: { nist: ['MEASURE 2.11'], eu: ['Art. 10'] } },
+        refs: { nist: ['MEASURE 2.11'], eu: ['Art. 10 provider'] } },
       { id: 'K3', title: 'Independent validation', tiers: [1], by: 'validator',
         evidence: 'Review by someone who did not build or procure it. Only the validator can attest this.',
         refs: { nist: ['MEASURE 1.3'] } },
-      { id: 'K4', title: 'Technical documentation and logging', tiers: [1],
-        evidence: 'System description, design choices, and automatic event logs retained.',
+      { id: 'K4', title: 'Technical documentation and logging', tiers: [1], if: 'provider',
+        evidence: 'System description, design choices, and automatic event logging built in.',
         refs: { eu: ['Art. 11', 'Art. 12'], iso: ['A.6.2'] } },
+      { id: 'D1', title: 'Provider instructions followed and logs kept', tiers: [1], if: 'deployer',
+        evidence: 'Instructions for use on file and followed; the logs the system generates are kept for at least six months.',
+        refs: { eu: ['Art. 26(1)', 'Art. 26(6)'], iso: ['A.9'] } },
       { id: 'K5', title: 'Explanation and contest route for affected people', tiers: [1],
         evidence: 'Notice given, plain-language explanation available, route to a human.',
-        refs: { nist: ['MEASURE 2.9'], eu: ['Art. 13', 'Art. 26(11)', 'Art. 86'] } },
-      { id: 'K6', title: 'Data governance', tiers: [1],
-        evidence: 'Provenance, quality and representativeness of training and input data.',
+        refs: { nist: ['MEASURE 2.9'], eu: ['Art. 13 provider', 'Art. 26(11) deployer', 'Art. 86'] } },
+      { id: 'K6', title: 'Data governance', tiers: [1], if: 'provider',
+        evidence: 'Provenance, quality and representativeness of training, validation and test data.',
         refs: { eu: ['Art. 10'], iso: ['A.7'] } },
+      { id: 'D2', title: 'Input data fit for the intended purpose', tiers: [1], if: 'deployer',
+        evidence: 'The data we feed it is relevant and representative for how the provider says it should be used.',
+        refs: { eu: ['Art. 26(4)'], iso: ['A.7'] } },
+      { id: 'P1', title: 'Conformity assessment, declaration and registration', tiers: [1], if: 'providerHigh',
+        evidence: 'Conformity assessment completed, EU declaration of conformity drawn up, system registered.',
+        refs: { eu: ['Art. 43', 'Art. 47', 'Art. 49'] } },
     ],
 
     goLiveChecks: [
@@ -186,6 +203,14 @@
       { id: 'stop', text: 'Stop or rollback mechanism has been tested' },
       { id: 'user', text: 'Users know the limits and the escalation route' },
       { id: 'perm', text: 'Production permissions match the approved tool manifest', if: 'agent' },
+    ],
+
+    retireChecks: [
+      { id: 'access', text: 'Access removed and integrations switched off' },
+      { id: 'creds',  text: 'Agent credentials and API keys revoked', if: 'agent' },
+      { id: 'data',   text: 'Data deleted or archived under the retention schedule' },
+      { id: 'users',  text: 'Users told, and pointed to what replaces it' },
+      { id: 'log',    text: 'Decision record and audit log retained' },
     ],
 
     // How the agent track differs from the standard path. Enforced by the engine, rendered on the policy page.
@@ -199,6 +224,8 @@
       { id: 'name',     label: 'Use case name', type: 'text' },
       { id: 'kind',     label: 'What kind of AI is it?', type: 'select',
         options: ['AI system or model (produces output for people)', 'AI agent (takes actions through tools)'] },
+      { id: 'euRole',   label: 'Our role under the EU AI Act', type: 'select',
+        options: ['Deployer (we use AI someone else built)', 'Provider (we build it or place it on the market under our name)', 'Both (we build it and use it ourselves)'] },
       { id: 'unit',     label: 'Business unit', type: 'text' },
       { id: 'purpose',  label: 'What will it do, and what problem does it solve?', type: 'area' },
       { id: 'affected', label: 'Who is affected by its outputs?', type: 'text' },
